@@ -13,6 +13,28 @@ in Claude Code through the Unity Gateway CLI (`ug`). Unity Gateway skills are in
 | `skills/` | Demo skills: `yt-commit-style` (live), `uc-rehearsal-check` (rehearsal) |
 | `scripts/` | `publish-skill.sh`, `publish-repo.sh`, `rehearse.sh` |
 
+## Two CLIs, two directions
+
+| | Databricks CLI (`databricks`) | Unity Gateway CLI (`ug`) |
+|---|---|---|
+| Direction | Your machine → **into** Unity Catalog | Unity Catalog → **out to** your coding agent |
+| Use it to | Create schemas, publish skills (create, upload, finalize), update, delete, grant access, list what's published | Connect your agent to the workspace, download skills or connect them over MCP, launch the agent |
+| Key commands | `ai-gateway create-skill`, `fs cp`, `ai-gateway finalize-skill`, `ai-gateway list-skills`, `grants update skill` | `ug configure`, `ug skills add`, `ug skills list`, `ug skills remove`, `ug claude` |
+| Who runs it | Skill authors and admins | Anyone using skills in their agent |
+
+`ug` can't publish skills, and `databricks` doesn't configure agents. Rule of thumb: **changing
+what's in UC → `databricks`; changing what your agent sees → `ug`.**
+
+Two listing commands, easy to mix up:
+
+```bash
+# databricks: what's PUBLISHED in a UC schema (only skills you have access to)
+databricks ai-gateway list-skills schemas/<catalog>.demo_skills
+
+# ug: what's CONFIGURED for your agents on THIS machine, and how each was added
+ug skills list
+```
+
 ## Setup
 
 1. **Enable the preview:** a workspace admin turns on *Unity Gateway skills in Genie*
@@ -66,6 +88,9 @@ databricks ai-gateway finalize-skill skills/<catalog>.demo_skills.yt-commit-styl
 
 # Download the published skill into Claude Code's skill folders
 ug skills add --names <catalog>.demo_skills.yt-commit-style
+
+# Confirm the agent has it: shows NAME, LOCATION (UC schema), VIA (local = downloaded), AGENTS
+ug skills list
 
 # Start Claude Code through Unity Gateway; it loads the skill at startup
 ug claude

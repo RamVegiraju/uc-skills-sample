@@ -40,8 +40,15 @@ export DATABRICKS_CONFIG_PROFILE=<profile>
 # Go to the project folder (the scripts and skill paths are relative to it)
 cd uc-skills-sample
 
-# Confirm no skills are configured yet, so the demo starts clean
+# Confirm no skills are configured yet, so the demo starts clean.
+# ug skills list only reads local state: what ug has set up for your agents on this machine.
 ug skills list
+```
+
+Expected:
+
+```
+• No skills configured. Use `ug skills add` to configure skills.
 ```
 
 ---
@@ -92,9 +99,30 @@ Open **Catalog → <catalog> → demo_skills → yt-commit-style**. Show the fil
 # Download the skill from UC into Claude Code's skill folders (~/.claude/skills, ~/.agents/skills)
 ug skills add --names <catalog>.demo_skills.yt-commit-style
 
-# Confirm it's configured, and see how it was added (downloaded)
+# Confirm the skill made it from Unity Catalog to your agent on this machine
 ug skills list
+```
 
+Expected (good on-camera moment — the skill went from UC to your agent):
+
+```
+Configured Skills
+
+NAME               LOCATION                    VIA      AGENTS
+yt-commit-style    <catalog>.demo_skills   local    all
+```
+
+| Column | Meaning |
+|---|---|
+| NAME | The skill's name |
+| LOCATION | The UC schema it came from |
+| VIA | How it was added: `local` = downloaded to disk (MCP-connected schemas show a different value) |
+| AGENTS | Which configured agents get it |
+
+> `ug skills list` shows what's on **your machine**. To see what's **published in UC**, use
+> `databricks ai-gateway list-skills schemas/<catalog>.demo_skills`.
+
+```bash
 # Start Claude Code through Unity Gateway; it loads the new skill at startup
 ug claude
 ```
