@@ -118,7 +118,8 @@ databricks fs cp -r --overwrite skills/yt-commit-style dbfs:/Skills/<catalog>/de
 # Re-finalize so UC reads the new SKILL.md (ownership and grants stay the same)
 databricks ai-gateway finalize-skill skills/<catalog>.demo_skills.yt-commit-style
 
-# Downloaded copies are snapshots, so download again to get the new version
+# Downloaded copies are snapshots, so download again to get the new version.
+# ug asks "A skill named `yt-commit-style` already exists. Overwrite it?" — answer y.
 ug skills add --names <catalog>.demo_skills.yt-commit-style
 ```
 
