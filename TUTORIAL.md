@@ -42,7 +42,10 @@ grant → discover/use from the agent → update.
 - Privileges to publish: `USE CATALOG` on the catalog, `USE SCHEMA` + `CREATE VOLUME` on the schema.
 
 ```bash
-databricks --version          # Databricks CLI v1.21.0
+# Check the Databricks CLI is v1.21+ (needed for the ai-gateway skill commands)
+databricks --version
+
+# Check uv is installed (it installs ug and fetches Python 3.12+ for it)
 uv --version
 ```
 
@@ -51,8 +54,13 @@ uv --version
 ## 2. Install the Unity Gateway CLI
 
 ```bash
+# Install the Unity Gateway CLI straight from GitHub as an isolated uv tool
 uv tool install git+https://github.com/databricks/unity-gateway
+
+# Confirm it's on your PATH
 ug --version
+
+# List the top-level commands (configure, skills, mcp, claude, ...)
 ug --help
 ```
 
@@ -65,11 +73,15 @@ ug --help
 **Databricks CLI** (used for publishing):
 
 ```bash
+# Sign in with OAuth in the browser and save the credentials as profile "<profile>"
 databricks auth login \
   --host https://<workspace-host> \
   --profile <profile>
 
-export DATABRICKS_CONFIG_PROFILE=<profile>   # so we can skip --profile on every command
+# Make that profile the default for this shell, so later commands can skip --profile
+export DATABRICKS_CONFIG_PROFILE=<profile>
+
+# Confirm who you're signed in as
 databricks current-user me
 ```
 
@@ -82,11 +94,17 @@ service that relays each caller's Claude login (it stores no credential), follow
 Then point `ug` at it ([Use Claude Code with Unity Gateway](https://docs.databricks.com/aws/en/ai-gateway/coding-agent-claude)):
 
 ```bash
+# Create a UC model provider service for Anthropic in "relayed" mode: it stores no API key and
+# forwards each caller's own Claude login. allow_all_targets exposes every Claude model.
 databricks ai-gateway create-model-provider-service schemas/<catalog>.default claude_subscription \
   --json '{"config":{"provider_type":"EXTERNAL_MODEL_PROVIDER_TYPE_ANTHROPIC","anthropic":{"relayed":{}},"allow_all_targets":true}}'
 
+# Point Claude Code at that service. --user writes user-level settings only (no machine-wide
+# changes); --provider sends requests through the service, billed to your Claude subscription.
 ug configure --user --agents claude --provider <catalog>.default.claude_subscription --profile <profile>
-ug doctor          # sanity check the install + agent config
+
+# Check the install, workspace, auth and agent config, and offer fixes
+ug doctor
 ```
 
 Docs: requests are "billed against the caller's Anthropic subscription and are subject to that
@@ -96,6 +114,7 @@ Works with Pro, Max, Team or Enterprise plans.
 **Default (Databricks-hosted models, billed to the workspace):**
 
 ```bash
+# Sign in and route Claude Code to Databricks-hosted Claude models through the workspace gateway
 ug configure --agents claude --workspace https://<workspace-host>
 ```
 
@@ -123,6 +142,7 @@ A schema is the unit of discovery and sharing for skills, so organize by audienc
 | `<catalog>.demo_skills` | The skill we write live |
 
 ```bash
+# Create three schemas in the <catalog> catalog (usage: schemas create <schema> <catalog>)
 databricks schemas create databricks_skills <catalog> --comment "Official Databricks agent skills"
 databricks schemas create central_skills    <catalog> --comment "Curated ML/DE skills from central-skill-repo"
 databricks schemas create demo_skills       <catalog> --comment "Skills authored live for the YT demo"
@@ -139,12 +159,16 @@ CREATE SCHEMA IF NOT EXISTS `<catalog>`.databricks_skills;
 ## 5. Get the sample skills
 
 ```bash
+# Make a folder for the sample repos and download them (--depth 1 = latest commit only)
 mkdir -p sources && cd sources
 git clone --depth 1 https://github.com/databricks/databricks-agent-skills.git
 git clone --depth 1 https://github.com/RamVegiraju/central-skill-repo.git
 cd ..
 
-ls sources/databricks-agent-skills/skills      # one folder per skill
+# List the skills: each folder is one skill
+ls sources/databricks-agent-skills/skills
+
+# Show the frontmatter (name + description) at the top of one SKILL.md
 head -8 sources/databricks-agent-skills/skills/databricks-dbsql/SKILL.md
 ```
 
@@ -166,21 +190,25 @@ head -8 sources/databricks-agent-skills/skills/databricks-dbsql/SKILL.md
 Do this one by hand so viewers see what's really happening.
 
 ```bash
-# 1) Register the securable  <catalog>.databricks_skills.databricks-dbsql
+# 1) Register the skill as a UC securable (<catalog>.databricks_skills.databricks-dbsql)
+#    and set up its managed storage. You become the owner; no files are sent yet.
 databricks ai-gateway create-skill schemas/<catalog>.databricks_skills databricks-dbsql \
   --comment "DBSQL features and SQL warehouse guidance"
 
-# 2) Upload the bundle into the skill's managed storage
+# 2) Upload the local folder (SKILL.md + supporting files) into that storage.
+#    -r copies the whole folder; --overwrite replaces files already there.
 databricks fs cp -r --overwrite \
   sources/databricks-agent-skills/skills/databricks-dbsql \
   dbfs:/Skills/<catalog>/databricks_skills/databricks-dbsql
 
+# List what landed remotely
 databricks fs ls dbfs:/Skills/<catalog>/databricks_skills/databricks-dbsql
 
-# 3) Finalize: validates SKILL.md and publishes name/description metadata
+# 3) Validate SKILL.md's frontmatter and publish the name/description,
+#    which makes the skill discoverable to agents
 databricks ai-gateway finalize-skill skills/<catalog>.databricks_skills.databricks-dbsql
 
-# Inspect it
+# Show the skill's metadata (owner, description, finalize time) as JSON
 databricks ai-gateway get-skill skills/<catalog>.databricks_skills.databricks-dbsql -o json
 ```
 
@@ -196,16 +224,18 @@ databricks ai-gateway get-skill skills/<catalog>.databricks_skills.databricks-db
 exists, strips `.git`/`.DS_Store`). `scripts/publish-repo.sh` loops over a folder.
 
 ```bash
+# Make the helper scripts executable
 chmod +x scripts/*.sh
 
-# Everything from the official Databricks repo
+# Publish every skill folder in the official Databricks repo into databricks_skills
 ./scripts/publish-repo.sh sources/databricks-agent-skills/skills <catalog>.databricks_skills
 
-# A curated handful from central-skill-repo (it has 100+ skills)
+# Publish only the named skills from central-skill-repo (it has 100+) into central_skills
 ./scripts/publish-repo.sh sources/central-skill-repo <catalog>.central_skills \
   system-design api-design-reviewer database-designer slo-architect \
   langgraph-human-in-the-loop huggingface-papers
 
+# List the skills now in the central_skills schema
 databricks ai-gateway list-skills schemas/<catalog>.central_skills -o json
 ```
 
@@ -225,7 +255,10 @@ Skills are private to the owner until granted. A consumer needs:
 **CLI:** skills are their own securable type, `skill`:
 
 ```bash
-databricks grants get skill <catalog>.central_skills.system-design      # {} = private
+# Show who has access to the skill. {} means nobody but the owner, so it's private.
+databricks grants get skill <catalog>.central_skills.system-design
+
+# Give the data-team group READ VOLUME, which lets them read and use the skill
 databricks grants update skill <catalog>.central_skills.system-design \
   --json '{"changes":[{"principal":"data-team","add":["READ_VOLUME"]}]}'
 ```
@@ -248,8 +281,8 @@ GRANT USE SCHEMA  ON SCHEMA  `<catalog>`.central_skills TO `data-team`;
 **List / discover**
 
 ```bash
-ug skills            # shows the registry state for your configured agents
-ug skills list       # what's configured locally and how it was added
+# Show the skills ug has configured for your agents, and how each was added (download or MCP)
+ug skills list
 ```
 
 Then inside the agent (`ug claude`):
@@ -267,16 +300,18 @@ Only skills you have privileges on come back. Empty list = no privileges or noth
 | Live (MCP) | `ug skills add --location <catalog>.central_skills --via mcp` | Yes | No | Always latest |
 
 ```bash
-# Download two skills (comma-separated, fully qualified)
+# Download two specific skills into the agent's skill folders (comma-separated, full names)
 ug skills add --names <catalog>.central_skills.system-design,<catalog>.central_skills.slo-architect
 
-# Download a whole schema
+# Download every skill in a schema
 ug skills add --location <catalog>.databricks_skills
 
-# Or load a whole schema live over MCP — always the latest published version
+# Or connect a whole schema live over MCP instead of downloading: the agent always gets
+# the latest published version, but needs a network connection
 ug skills add --location <catalog>.central_skills --via mcp
 
-ug claude            # restart the agent through Unity Gateway to pick changes up
+# Start (or restart) Claude Code through Unity Gateway so it loads the new skills
+ug claude
 ```
 
 Downloaded skills land in `.claude/skills/` and `.agents/skills/`.
@@ -284,7 +319,10 @@ Downloaded skills land in `.claude/skills/` and `.agents/skills/`.
 Clean up locally (the published skills in UC are untouched):
 
 ```bash
+# Pick downloaded skills to delete from your local skill folders
 ug skills remove
+
+# Pick schemas to disconnect from the agent's skills MCP connection
 ug skills remove --via mcp
 ```
 
@@ -303,19 +341,20 @@ skills/yt-commit-style/
 ```
 
 ```bash
+# Show the skill's instructions
 cat skills/yt-commit-style/SKILL.md
 
-# Publish it (create -> upload -> finalize)
+# Publish it: the script runs create-skill, then fs cp, then finalize-skill
 ./scripts/publish-skill.sh skills/yt-commit-style <catalog>.demo_skills.yt-commit-style
 
-# Confirm it's registered
+# Confirm it's registered and finalized in UC
 databricks ai-gateway get-skill skills/<catalog>.demo_skills.yt-commit-style -o json
 
-# Pull it into the agent and try it
+# Download it into Claude Code's skill folders, then start Claude Code through Unity Gateway
 ug skills add --names <catalog>.demo_skills.yt-commit-style
 ug claude
 #   > "write a commit message for adding a README"
-#   → ✨ docs(readme): ... + Reviewed-by: uc-skills-demo
+#   → 📝 docs(readme): ... + Reviewed-by: uc-skills-demo
 ```
 
 **Update loop (show versioning-by-republish):** edit `SKILL.md` (e.g. change the footer to
@@ -369,8 +408,11 @@ Catalog schema" notebook on a schedule instead (it creates/updates, never delete
 ## 12. Cleanup
 
 ```bash
+# Delete the skill from UC (its stored files are removed in the background)
 databricks ai-gateway delete-skill skills/<catalog>.demo_skills.yt-commit-style
-databricks schemas delete <catalog>.demo_skills
+
+# Delete the schema; --force deletes it even if it still contains objects
+databricks schemas delete <catalog>.demo_skills --force
 ```
 
 ---
@@ -380,7 +422,8 @@ databricks schemas delete <catalog>.demo_skills
 | Task | Command |
 |---|---|
 | Install ug | `uv tool install git+https://github.com/databricks/unity-gateway` |
-| Connect agent | `ug configure --agents claude --workspace https://<host>` |
+| Connect agent (your Claude plan) | `ug configure --user --agents claude --provider <cat>.<sch>.<service>` |
+| Connect agent (workspace-billed) | `ug configure --agents claude --workspace https://<host>` |
 | Create skill | `databricks ai-gateway create-skill schemas/<cat>.<sch> <skill>` |
 | Upload bundle | `databricks fs cp -r --overwrite <dir> dbfs:/Skills/<cat>/<sch>/<skill>` |
 | Finalize | `databricks ai-gateway finalize-skill skills/<cat>.<sch>.<skill>` |
