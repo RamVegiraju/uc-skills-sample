@@ -1,143 +1,62 @@
-# Governed Agent Skill with Unity Catalog
+# UC Skills demo
 
-This sample shows the complete lifecycle of a small, portable
-[Agent Skill](https://agentskills.io/home): develop it locally, publish it as a
-governed `catalog.schema.skill`, share it with Unity Catalog permissions, and load
-it into an MCP-capable coding agent.
+Publish agent skills to Unity Catalog as governed `catalog.schema.skill` objects, then use them
+in Claude Code through the Unity Gateway CLI (`ug`). Unity Gateway skills are in Beta.
 
-The example skill reviews Databricks SQL for correctness, efficiency, and shared
-team conventions. It contains no workspace URL, profile, catalog, schema, user, or
-credential. You supply those values when configuring or publishing it.
+## Contents
 
-> Unity Catalog Skills are currently in Beta. An account administrator must enable
-> the Unity AI preview before skills can be created or used.
+| Path | What it is |
+|---|---|
+| [`LIVE_DEMO.md`](LIVE_DEMO.md) | The on-camera run: upload `yt-commit-style`, use it via `ug` |
+| [`REHEARSAL.md`](REHEARSAL.md) | Automated end-to-end check (`./scripts/rehearse.sh`) |
+| [`TUTORIAL.md`](TUTORIAL.md) | Full reference: bulk publishing, sharing, GitHub Action, cheat sheet |
+| `skills/` | Demo skills: `yt-commit-style` (live), `uc-rehearsal-check` (rehearsal) |
+| `scripts/` | `publish-skill.sh`, `publish-repo.sh`, `rehearse.sh` |
 
-## Repository layout
+## Setup
 
-```text
-databricks-sql-guide/
-├── SKILL.md
-└── references/
-    └── review-checklist.md
-```
+1. **Enable the preview:** a workspace admin turns on *Unity Gateway skills in Genie*
+   ([Manage previews](https://docs.databricks.com/aws/en/admin/workspace-settings/manage-previews)).
+2. **Install the CLIs:** Databricks CLI v1.21+ and `ug`
+   ([ug CLI reference](https://docs.databricks.com/aws/en/ai-gateway/coding-agent-ug-cli)).
+   ```bash
+   uv tool install git+https://github.com/databricks/unity-gateway
+   databricks auth login --host https://<workspace-host> --profile <profile>
+   ```
+3. **Create a model provider service for your Claude subscription** (one-time, admin)
+   ([Create a model provider service](https://docs.databricks.com/aws/en/ai-gateway/create-model-provider-services#use-each-callers-claude-or-chatgpt-subscription),
+   [Claude Max / Enterprise support](https://docs.databricks.com/aws/en/ai-gateway/claude-max-anthropic-enterprise-support)).
+   ```bash
+   databricks ai-gateway create-model-provider-service schemas/<catalog>.default claude_subscription \
+     --json '{"config":{"provider_type":"EXTERNAL_MODEL_PROVIDER_TYPE_ANTHROPIC","anthropic":{"relayed":{}},"allow_all_targets":true}}'
+   ```
+4. **Connect Claude Code** ([Use Claude Code with Unity Gateway](https://docs.databricks.com/aws/en/ai-gateway/coding-agent-claude)).
+   ```bash
+   ug configure --user --agents claude --provider <catalog>.default.claude_subscription --profile <profile>
+   ```
 
-| Path | Purpose |
-| --- | --- |
-| `databricks-sql-guide/SKILL.md` | Skill metadata, activation description, and workflow |
-| `databricks-sql-guide/references/review-checklist.md` | Detailed rules loaded only during a SQL review |
+> **Billing:** with `--provider`, model requests are billed to your Claude subscription. A plain
+> `ug configure` routes Claude Code to Databricks-hosted models billed to the workspace, and
+> writes machine-wide settings. Undo either with `ug revert`.
 
-This separation demonstrates progressive disclosure: agents discover the skill from
-its name and description, load `SKILL.md` when it matches a request, and read the
-checklist only when needed.
-
-## Try it locally
-
-Copy or link `databricks-sql-guide/` into the skills directory used by your coding
-agent. Agents that follow the open format commonly discover project skills from
-`.agents/skills/`.
-
-Then ask:
-
-```text
-Review this Databricks SQL using our SQL guide and return a corrected query:
-
-SELECT *
-FROM samples.nyctaxi.trips
-WHERE trip_distance > 5
-```
-
-The skill should identify `SELECT *`, preserve the query's meaning, and return a
-corrected query plus a short findings list. For a real table, it should inspect the
-schema before expanding `*` rather than inventing column names.
-
-## Publish to Unity Catalog
-
-The current Databricks workflow uses the open-source `ucode` client and the
-`databricks-skill-registry` MCP server.
-
-### Prerequisites
-
-- Python 3.12+ and `uv`
-- An MCP-capable agent such as Codex
-- A Unity Catalog-enabled workspace with the Unity AI preview enabled
-- `USE SCHEMA` and `CREATE VOLUME` on the target schema
-
-### Choose your values
-
-| Placeholder | Example shape | Meaning |
-| --- | --- | --- |
-| `<workspace-host>` | `your-workspace.cloud.databricks.com` | Hostname only; do not include a path |
-| `<catalog>` | `skills` | Standard Unity Catalog catalog with managed storage |
-| `<schema>` | `sql_skills` | Schema that will govern the published skill |
-
-Do not commit authentication tokens or replace these placeholders in this repository.
-`ucode` performs interactive browser authentication on each user's machine.
-
-### Connect your coding agent
-
-Install and connect `ucode` (replace the host; browser sign-in is interactive):
+## Publish and use a skill
 
 ```bash
-uv tool install git+https://github.com/databricks/ucode
-ucode configure --agents codex --workspaces https://<workspace-host>
-ucode configure skills
+export DATABRICKS_CONFIG_PROFILE=<profile>
+databricks schemas create demo_skills <catalog>
+databricks ai-gateway create-skill schemas/<catalog>.demo_skills yt-commit-style
+databricks fs cp -r --overwrite skills/yt-commit-style dbfs:/Skills/<catalog>/demo_skills/yt-commit-style
+databricks ai-gateway finalize-skill skills/<catalog>.demo_skills.yt-commit-style
+
+ug skills add --names <catalog>.demo_skills.yt-commit-style
+ug claude
 ```
 
-Restart the agent with `ucode codex` so it loads the newly registered
-`databricks-skill-registry` MCP server.
+## Docs
 
-### Publish
-
-Prompt the connected agent:
-
-```text
-Publish my ./databricks-sql-guide folder to the <catalog>.<schema> schema in Databricks.
-```
-
-The connected agent calls `create_skill`; future revisions use `update_skill`.
-Publishing is intentionally not automated by this repository because catalog,
-schema, workspace, and authorization are deployment choices.
-
-## Share
-
-The skill starts private to its owner. In Catalog Explorer, grant a consumer:
-
-- `USE CATALOG` on the catalog
-- `USE SCHEMA` on the schema
-- `READ VOLUME` on the skill
-
-Sharing is a grant, not a copy. The consumer always remains subject to Unity Catalog
-authorization and audit.
-
-## Consume
-
-A consumer can ask a connected agent to load
-`<catalog>.<schema>.databricks-sql-guide` for one session. To download a point-in-time
-copy for future sessions, run:
-
-```bash
-ucode configure skills --location <catalog>.<schema> --skill databricks-sql-guide
-```
-
-To expose every skill in a schema live and always use the newest published version:
-
-```bash
-ucode configure skills --location <catalog>.<schema> --mcp
-```
-
-Restart the coding agent after changing its downloaded or live skill configuration.
-
-## Expected behavior
-
-Given a Databricks SQL query, the sample skill should:
-
-1. Preserve the requested business meaning and output grain.
-2. Return the revised SQL before its findings.
-3. Prioritize correctness, then avoidable scan cost, then maintainability.
-4. Inspect available metadata or clearly identify unknowns instead of inventing
-   columns, partition keys, or table properties.
-
-## Sources
-
-- [Databricks: Skills support in Unity Gateway](https://docs.databricks.com/aws/en/agents/uc-skills/)
-- [Agent Skills open format](https://agentskills.io/home)
+- [Unity Gateway skills overview](https://docs.databricks.com/aws/en/agents/uc-skills/)
+- [Create and share skills](https://docs.databricks.com/aws/en/agents/uc-skills/create-share-uc-skills)
+- [Use skills from a coding agent](https://docs.databricks.com/aws/en/agents/uc-skills/use-uc-skills)
+- [Model provider services](https://docs.databricks.com/aws/en/ai-gateway/model-provider-services)
+- [unity-gateway on GitHub](https://github.com/databricks/unity-gateway)
+- Sample skills: [databricks-agent-skills](https://github.com/databricks/databricks-agent-skills), [central-skill-repo](https://github.com/RamVegiraju/central-skill-repo)
